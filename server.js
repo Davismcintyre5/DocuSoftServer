@@ -25,7 +25,7 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
-// ============ CORS CONFIGURATION - FIXED ============
+// ============ CORS CONFIGURATION ============
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -36,41 +36,45 @@ const allowedOrigins = [
   'https://docusoftserver.pxxl.click'
 ];
 
-// CORS middleware - MUST BE FIRST
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || origin.endsWith('.pxxl.click')) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️ Blocked CORS request from: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type'],
+  maxAge: 86400
+}));
+
+// Handle preflight requests
+app.options('*', cors());
+
+// ============ BODY PARSERS ============
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+
+// ============ TIMEOUT CONFIGURATION ============
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Allow all .pxxl.click domains and localhost
-  if (origin && (origin.includes('localhost') || origin.endsWith('.pxxl.click'))) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
-    res.setHeader('Access-Control-Max-Age', '86400');
-  } else if (process.env.NODE_ENV === 'development') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-  }
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  
+  req.setTimeout(600000); // 10 minutes
+  res.setTimeout(600000); // 10 minutes
   next();
 });
 
-// Body parsers with increased limits
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+// Trust proxy (for Cloudflare or reverse proxies)
+app.set('trust proxy', true);
 
 // ============ STATIC FILE SERVING ============
 const uploadsPath = path.join(__dirname, 'uploads');
 console.log(`📁 Serving uploads from: ${uploadsPath}`);
 
-// Create directories if they don't exist
+// Create upload directories if they don't exist
 if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true });
 }
@@ -81,17 +85,72 @@ if (!fs.existsSync(uploadsPath)) {
   }
 });
 
+// Serve static files with proper MIME types for ZIP/RAR
 app.use('/uploads', express.static(uploadsPath, {
   setHeaders: (res, filePath) => {
+    // Images
     if (filePath.endsWith('.png')) res.setHeader('Content-Type', 'image/png');
     else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) res.setHeader('Content-Type', 'image/jpeg');
-    else if (filePath.endsWith('.zip')) res.setHeader('Content-Type', 'application/zip');
-    else if (filePath.endsWith('.rar')) res.setHeader('Content-Type', 'application/x-rar-compressed');
+    else if (filePath.endsWith('.gif')) res.setHeader('Content-Type', 'image/gif');
+    else if (filePath.endsWith('.webp')) res.setHeader('Content-Type', 'image/webp');
+    // Documents
+    else if (filePath.endsWith('.pdf')) res.setHeader('Content-Type', 'application/pdf');
+    else if (filePath.endsWith('.doc')) res.setHeader('Content-Type', 'application/msword');
+    else if (filePath.endsWith('.docx')) res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    else if (filePath.endsWith('.txt')) res.setHeader('Content-Type', 'text/plain');
+    // Archives - ZIP and RAR support
+    else if (filePath.endsWith('.zip')) {
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', 'attachment');
+    }
+    else if (filePath.endsWith('.rar')) {
+      res.setHeader('Content-Type', 'application/x-rar-compressed');
+      res.setHeader('Content-Disposition', 'attachment');
+    }
+    // Software
+    else if (filePath.endsWith('.exe')) res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
+    else if (filePath.endsWith('.msi')) res.setHeader('Content-Type', 'application/x-msi');
+    else if (filePath.endsWith('.dmg')) res.setHeader('Content-Type', 'application/x-apple-diskimage');
+    
+    // CORS for static files
     res.setHeader('Access-Control-Allow-Origin', '*');
+    // Cache control
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
   }
 }));
 
-// ============ ROUTES ============
+// ============ DEBUG ENDPOINT ============
+app.get('/debug/check-file/:type/:filename', (req, res) => {
+  const { type, filename } = req.params;
+  const filePath = path.join(uploadsPath, type, filename);
+  
+  if (fs.existsSync(filePath)) {
+    const stats = fs.statSync(filePath);
+    res.json({ 
+      exists: true, 
+      path: filePath,
+      size: stats.size,
+      sizeMB: (stats.size / 1024 / 1024).toFixed(2),
+      modified: stats.mtime,
+      url: `/uploads/${type}/${filename}`,
+      fullUrl: `${process.env.BASE_URL || 'http://localhost:5000'}/uploads/${type}/${filename}`
+    });
+  } else {
+    let files = [];
+    const dirPath = path.join(uploadsPath, type);
+    if (fs.existsSync(dirPath)) {
+      files = fs.readdirSync(dirPath);
+    }
+    res.json({ 
+      exists: false, 
+      path: filePath,
+      message: 'File not found',
+      availableFiles: files.slice(0, 10)
+    });
+  }
+});
+
+// ============ API ROUTES ============
 app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/documents', documentRoutes);
@@ -101,48 +160,27 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 
-// ============ DEBUG ENDPOINT ============
-app.get('/debug/routes', (req, res) => {
-  const routes = [];
-  app._router.stack.forEach(middleware => {
-    if (middleware.route) {
-      routes.push({
-        path: middleware.route.path,
-        methods: Object.keys(middleware.route.methods)
-      });
-    } else if (middleware.name === 'router' && middleware.handle) {
-      middleware.handle.stack.forEach(handler => {
-        if (handler.route) {
-          routes.push({
-            path: handler.route.path,
-            methods: Object.keys(handler.route.methods)
-          });
-        }
-      });
-    }
-  });
-  res.json({ 
-    message: 'Registered routes',
-    softwareRoutes: routes.filter(r => r.path && r.path.includes('software'))
-  });
-});
-
-// Health check
+// ============ HEALTH CHECK ============
 app.get('/health', (req, res) => {
   res.json({ 
-    status: 'OK', 
+    status: 'OK',
     message: 'DocuSoft Server Running',
+    environment: process.env.NODE_ENV || 'development',
+    server: process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`,
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    uploadPath: uploadsPath,
     timestamp: new Date().toISOString(),
-    uploadPath: uploadsPath
+    uptime: process.uptime()
   });
 });
 
-// API info
+// ============ API INFO ============
 app.get('/api', (req, res) => {
   res.json({
     name: 'DocuSoft API',
     version: '1.0.0',
     status: 'running',
+    environment: process.env.NODE_ENV || 'development',
     endpoints: {
       auth: '/api/auth',
       categories: '/api/categories',
@@ -151,12 +189,13 @@ app.get('/api', (req, res) => {
       payments: '/api/payments',
       orders: '/api/orders',
       admin: '/api/admin',
-      settings: '/api/settings'
+      settings: '/api/settings',
+      health: '/health'
     }
   });
 });
 
-// Root route
+// ============ ROOT ROUTE ============
 app.get('/', (req, res) => {
   res.json({ 
     message: 'DocuSoft API Server Running',
@@ -166,29 +205,64 @@ app.get('/', (req, res) => {
   });
 });
 
-// 404 handler
+// ============ 404 HANDLER ============
 app.use((req, res) => {
   res.status(404).json({ 
     message: 'Route not found',
     path: req.path,
-    method: req.method
+    method: req.method,
+    timestamp: new Date().toISOString()
   });
 });
 
-// Global error handler
+// ============ GLOBAL ERROR HANDLER ============
 app.use(errorHandler);
 
+// ============ START SERVER ============
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log('\n' + '='.repeat(60));
+const server = app.listen(PORT, () => {
+  console.log('\n' + '='.repeat(70));
   console.log('🚀 DocuSoft Server Running');
-  console.log('='.repeat(60));
-  console.log(`📍 Port: ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 API URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}/api`);
-  console.log(`💚 Health: ${process.env.BASE_URL || `http://localhost:${PORT}`}/health`);
-  console.log(`📁 Uploads: ${uploadsPath}`);
-  console.log('='.repeat(60) + '\n');
+  console.log('='.repeat(70));
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔗 Server URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
+  console.log(`🌐 API Endpoint: ${process.env.BASE_URL || `http://localhost:${PORT}`}/api`);
+  console.log(`💚 Health Check: ${process.env.BASE_URL || `http://localhost:${PORT}`}/health`);
+  console.log(`📁 Uploads Directory: ${uploadsPath}`);
+  console.log(`💾 MongoDB: ${mongoose.connection.name} (${mongoose.connection.host})`);
+  console.log(`📡 Port: ${PORT}`);
+  console.log(`🕐 Started at: ${new Date().toISOString()}`);
+  console.log('='.repeat(70));
+  console.log('\n✅ Supported file types:');
+  console.log('   Documents: PDF, DOC, DOCX, TXT, RTF, ODT, ZIP, RAR');
+  console.log('   Software: ZIP, RAR, EXE, MSI, DMG, PKG, AppImage, DEB');
+  console.log('   Screenshots: JPG, PNG, GIF, WEBP');
+  console.log('='.repeat(70) + '\n');
 });
+
+// Graceful shutdown
+const gracefulShutdown = async (signal) => {
+  console.log(`\n🛑 Received ${signal}, closing server...`);
+  server.close(async () => {
+    console.log('✅ HTTP server closed');
+    try {
+      await mongoose.connection.close(false);
+      console.log('✅ MongoDB connection closed');
+      console.log('👋 Server shutdown complete');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ Error closing MongoDB:', err);
+      process.exit(1);
+    }
+  });
+  
+  setTimeout(() => {
+    console.error('⚠️ Could not close connections in time, forcing shutdown');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = app;
