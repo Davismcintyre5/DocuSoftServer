@@ -29,7 +29,7 @@ exports.getSoftware = async (req, res) => {
     const software = await query;
     res.json(software);
   } catch (error) {
-    console.error('Get software error:', error);
+    console.error('❌ Get software error:', error);
     res.status(500).json({ message: 'Failed to fetch software' });
   }
 };
@@ -51,7 +51,7 @@ exports.getSoftwareItem = async (req, res) => {
 
     res.json(software);
   } catch (error) {
-    console.error('Get software error:', error);
+    console.error('❌ Get software error:', error);
     res.status(500).json({ message: 'Failed to fetch software' });
   }
 };
@@ -95,14 +95,16 @@ exports.createSoftware = async (req, res) => {
       return res.status(400).json({ message: 'Price must be greater than 0 for paid items' });
     }
 
-    // Store file with relative path - SAME AS DOCUMENTS
+    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
+
+    // Store file with relative path
     const relativePath = `software/${file.filename}`;
     const fileInfo = {
       originalName: file.originalname,
       storedName: file.filename,
       relativePath: relativePath,
       absolutePath: file.path.replace(/\\/g, '/'),
-      publicUrl: pathManager.getPublicUrl(relativePath),
+      publicUrl: `${baseUrl}/uploads/${relativePath}`,
       mimeType: file.mimetype,
       size: file.size,
       extension: path.extname(file.originalname)
@@ -128,6 +130,10 @@ exports.createSoftware = async (req, res) => {
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({ message: 'Validation failed', errors });
+    }
+    
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Software with this title already exists' });
     }
     
     res.status(500).json({ message: 'Failed to create software' });
@@ -177,13 +183,15 @@ exports.updateSoftware = async (req, res) => {
         }
       }
 
+      const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5000}`;
       const relativePath = `software/${file.filename}`;
+      
       software.fileInfo = {
         originalName: file.originalname,
         storedName: file.filename,
         relativePath: relativePath,
         absolutePath: file.path.replace(/\\/g, '/'),
-        publicUrl: pathManager.getPublicUrl(relativePath),
+        publicUrl: `${baseUrl}/uploads/${relativePath}`,
         mimeType: file.mimetype,
         size: file.size,
         extension: path.extname(file.originalname)
@@ -196,7 +204,7 @@ exports.updateSoftware = async (req, res) => {
     
     res.json(software);
   } catch (error) {
-    console.error('Update software error:', error);
+    console.error('❌ Update software error:', error);
     res.status(500).json({ message: 'Failed to update software' });
   }
 };
@@ -220,7 +228,7 @@ exports.deleteSoftware = async (req, res) => {
     await software.deleteOne();
     res.json({ message: 'Software deleted successfully' });
   } catch (error) {
-    console.error('Delete software error:', error);
+    console.error('❌ Delete software error:', error);
     res.status(500).json({ message: 'Failed to delete software' });
   }
 };
@@ -240,20 +248,18 @@ exports.downloadSoftware = async (req, res) => {
       headers: req.headers.authorization ? 'Has Auth Header' : 'No Auth Header'
     });
 
-    // Free item -> stream immediately
     if (software.isFree) {
       console.log('✅ Free software - allowing download');
       return streamFile(software, res);
     }
 
-    // Check authentication
-    let token = req.headers.authorization;
-    if (!token) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
       console.log('❌ No authorization header for paid software');
       return res.status(401).json({ message: 'Please login to download paid items' });
     }
 
-    token = token.replace(/^Bearer\s+/i, '');
+    const token = authHeader.replace(/^Bearer\s+/i, '');
     if (!token) {
       return res.status(401).json({ message: 'Invalid authorization header format' });
     }
@@ -264,11 +270,10 @@ exports.downloadSoftware = async (req, res) => {
       userId = decoded.id;
       console.log('✅ Token verified for user:', userId);
     } catch (err) {
-      console.error('Token verification failed:', err.message);
+      console.error('❌ Token verification failed:', err.message);
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
-    // Check if order exists
     let order = await Order.findOne({
       user: userId,
       'items.itemId': software._id,
@@ -276,7 +281,6 @@ exports.downloadSoftware = async (req, res) => {
       status: 'completed'
     });
 
-    // If no order, try to create from a completed transaction
     if (!order) {
       console.log('🔍 No order found, checking for completed transaction');
       
@@ -320,7 +324,6 @@ exports.downloadSoftware = async (req, res) => {
 
     console.log('✅ User has purchased this software - allowing download');
 
-    // Update download count
     const item = order.items.find(i => i.itemId.toString() === software._id.toString());
     if (item) {
       item.downloadCount += 1;
@@ -335,21 +338,17 @@ exports.downloadSoftware = async (req, res) => {
   }
 };
 
-// Helper to stream file - SAME AS DOCUMENTS
+// Helper to stream file
 async function streamFile(item, res) {
   try {
     let filePath;
     
-    // Try relative path first (new method)
     if (item.fileInfo?.relativePath) {
       filePath = pathManager.getAbsolutePath(item.fileInfo.relativePath);
-    } 
-    // Fallback to absolute path (old data)
-    else if (item.fileInfo?.absolutePath) {
+    } else if (item.fileInfo?.absolutePath) {
       filePath = item.fileInfo.absolutePath;
-    } 
-    else {
-      console.error('No file path found in item:', item._id);
+    } else {
+      console.error('No file path in item:', item._id);
       return res.status(404).json({ message: 'File path not found' });
     }
 

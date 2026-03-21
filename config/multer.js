@@ -45,7 +45,6 @@ const screenshotStorage = multer.diskStorage({
 });
 
 // ============ FILE FILTERS ============
-// Document file filter
 const documentFileFilter = (req, file, cb) => {
   const allowed = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt'];
   const ext = path.extname(file.originalname).toLowerCase();
@@ -56,7 +55,6 @@ const documentFileFilter = (req, file, cb) => {
   }
 };
 
-// Software file filter - INCLUDES ZIP AND RAR
 const softwareFileFilter = (req, file, cb) => {
   const allowed = ['.zip', '.rar', '.exe', '.msi', '.dmg', '.pkg', '.appimage', '.deb'];
   const ext = path.extname(file.originalname).toLowerCase();
@@ -71,7 +69,6 @@ const softwareFileFilter = (req, file, cb) => {
   }
 };
 
-// Screenshot file filter
 const screenshotFileFilter = (req, file, cb) => {
   const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
@@ -86,37 +83,27 @@ const screenshotFileFilter = (req, file, cb) => {
 const uploadDocument = multer({
   storage: documentStorage,
   fileFilter: documentFileFilter,
-  limits: { 
-    fileSize: 100 * 1024 * 1024, // 100MB
-    fieldSize: 100 * 1024 * 1024
-  }
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB
 });
 
 const uploadSoftware = multer({
   storage: softwareStorage,
   fileFilter: softwareFileFilter,
-  limits: { 
-    fileSize: 500 * 1024 * 1024, // 500MB
-    fieldSize: 500 * 1024 * 1024,
-    files: 1
-  }
+  limits: { fileSize: 500 * 1024 * 1024 } // 500MB for software
 });
 
 const uploadScreenshot = multer({
   storage: screenshotStorage,
   fileFilter: screenshotFileFilter,
-  limits: { 
-    fileSize: 10 * 1024 * 1024, // 10MB
-    fieldSize: 10 * 1024 * 1024
-  }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
 });
 
-// Add error handling middleware for multer
+// Error handler for multer
 const handleMulterError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(413).json({ 
-        message: `File too large. Maximum size is ${err.field === 'file' ? '500MB' : '10MB'}.` 
+        message: `File too large. Maximum size is ${err.field === 'file' && req.originalUrl.includes('software') ? '500MB' : '100MB'}.` 
       });
     }
     return res.status(400).json({ message: err.message });
