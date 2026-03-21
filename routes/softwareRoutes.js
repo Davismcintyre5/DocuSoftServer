@@ -14,9 +14,9 @@ const router = express.Router();
 // Public routes
 router.get('/', getSoftware);
 router.get('/:id', getSoftwareItem);
-router.get('/:id/download', downloadSoftware);  // Make sure this route exists
+router.get('/:id/download', downloadSoftware);
 
-// Admin routes
+// Admin routes - EXACTLY like document routes
 router.post('/', protect, admin, uploadSoftware.single('file'), createSoftware);
 router.put('/:id', protect, admin, uploadSoftware.single('file'), updateSoftware);
 router.delete('/:id', protect, admin, deleteSoftware);

@@ -6,6 +6,7 @@ const pathManager = require('../config/pathManager');
 const fs = require('fs');
 const path = require('path');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 
 // Get all software (public)
 exports.getSoftware = async (req, res) => {
@@ -16,8 +17,15 @@ exports.getSoftware = async (req, res) => {
       const cat = await Category.findOne({ slug: category });
       if (cat) filter.category = cat._id;
     }
-    let query = Software.find(filter).populate('category', 'name slug').sort({ createdAt: -1 });
-    if (limit) query = query.limit(parseInt(limit));
+    
+    let query = Software.find(filter)
+      .populate('category', 'name slug')
+      .sort({ createdAt: -1 });
+    
+    if (limit) {
+      query = query.limit(parseInt(limit));
+    }
+    
     const software = await query;
     res.json(software);
   } catch (error) {
@@ -29,8 +37,18 @@ exports.getSoftware = async (req, res) => {
 // Get single software (public)
 exports.getSoftwareItem = async (req, res) => {
   try {
-    const software = await Software.findById(req.params.id).populate('category', 'name slug');
-    if (!software) return res.status(404).json({ message: 'Software not found' });
+    const { id } = req.params;
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid software ID format' });
+    }
+
+    const software = await Software.findById(id).populate('category', 'name slug');
+    
+    if (!software) {
+      return res.status(404).json({ message: 'Software not found' });
+    }
+
     res.json(software);
   } catch (error) {
     console.error('Get software error:', error);
@@ -41,16 +59,49 @@ exports.getSoftwareItem = async (req, res) => {
 // Create software (admin)
 exports.createSoftware = async (req, res) => {
   try {
+    console.log('📝 Creating software with data:', {
+      body: req.body,
+      file: req.file ? {
+        originalname: req.file.originalname,
+        filename: req.file.filename,
+        path: req.file.path,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      } : 'No file'
+    });
+
     const { title, description, category, price, isFree } = req.body;
     const file = req.file;
-    if (!file) return res.status(400).json({ message: 'File is required' });
 
+    if (!title) {
+      return res.status(400).json({ message: 'Title is required' });
+    }
+    if (!category) {
+      return res.status(400).json({ message: 'Category is required' });
+    }
+    if (!file) {
+      return res.status(400).json({ message: 'File is required' });
+    }
+
+    const categoryExists = await Category.findById(category);
+    if (!categoryExists) {
+      return res.status(400).json({ message: 'Category does not exist' });
+    }
+
+    const isFreeBool = isFree === 'true' || isFree === true;
+    const priceNum = isFreeBool ? 0 : Number(price);
+    
+    if (!isFreeBool && (!price || isNaN(priceNum) || priceNum <= 0)) {
+      return res.status(400).json({ message: 'Price must be greater than 0 for paid items' });
+    }
+
+    // Store file with relative path - SAME AS DOCUMENTS
     const relativePath = `software/${file.filename}`;
     const fileInfo = {
       originalName: file.originalname,
       storedName: file.filename,
-      relativePath,
-      absolutePath: file.path,
+      relativePath: relativePath,
+      absolutePath: file.path.replace(/\\/g, '/'),
       publicUrl: pathManager.getPublicUrl(relativePath),
       mimeType: file.mimetype,
       size: file.size,
@@ -61,15 +112,24 @@ exports.createSoftware = async (req, res) => {
       title,
       description: description || '',
       category,
-      price: isFree === 'true' ? 0 : Number(price),
-      isFree: isFree === 'true',
-      fileInfo
+      price: priceNum,
+      isFree: isFreeBool,
+      fileInfo,
+      downloadCount: 0
     });
-    await software.save();
-    await software.populate('category', 'name slug');
-    res.status(201).json(software);
+
+    const savedSoftware = await software.save();
+    await savedSoftware.populate('category', 'name slug');
+
+    res.status(201).json(savedSoftware);
   } catch (error) {
-    console.error('Create software error:', error);
+    console.error('❌ Create software error:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({ message: 'Validation failed', errors });
+    }
+    
     res.status(500).json({ message: 'Failed to create software' });
   }
 };
@@ -77,23 +137,32 @@ exports.createSoftware = async (req, res) => {
 // Update software (admin)
 exports.updateSoftware = async (req, res) => {
   try {
-    const software = await Software.findById(req.params.id);
-    if (!software) return res.status(404).json({ message: 'Software not found' });
-
     const { title, description, category, price, isFree } = req.body;
     const file = req.file;
 
+    const software = await Software.findById(req.params.id);
+    if (!software) {
+      return res.status(404).json({ message: 'Software not found' });
+    }
+
     if (title) software.title = title;
     if (description !== undefined) software.description = description;
+    
     if (category) {
-      const cat = await Category.findById(category);
-      if (!cat) return res.status(400).json({ message: 'Category does not exist' });
+      const categoryExists = await Category.findById(category);
+      if (!categoryExists) {
+        return res.status(400).json({ message: 'Category does not exist' });
+      }
       software.category = category;
     }
+    
     if (isFree !== undefined) {
-      software.isFree = isFree === 'true';
-      if (software.isFree) software.price = 0;
-      else if (price) software.price = Number(price);
+      software.isFree = isFree === 'true' || isFree === true;
+      if (software.isFree) {
+        software.price = 0;
+      } else if (price) {
+        software.price = Number(price);
+      }
     } else if (price) {
       software.price = Number(price);
     }
@@ -101,14 +170,19 @@ exports.updateSoftware = async (req, res) => {
     if (file) {
       // Delete old file if exists
       if (software.fileInfo?.absolutePath && fs.existsSync(software.fileInfo.absolutePath)) {
-        fs.unlinkSync(software.fileInfo.absolutePath);
+        try {
+          fs.unlinkSync(software.fileInfo.absolutePath);
+        } catch (unlinkError) {
+          console.error('Failed to delete old file:', unlinkError);
+        }
       }
+
       const relativePath = `software/${file.filename}`;
       software.fileInfo = {
         originalName: file.originalname,
         storedName: file.filename,
-        relativePath,
-        absolutePath: file.path,
+        relativePath: relativePath,
+        absolutePath: file.path.replace(/\\/g, '/'),
         publicUrl: pathManager.getPublicUrl(relativePath),
         mimeType: file.mimetype,
         size: file.size,
@@ -119,6 +193,7 @@ exports.updateSoftware = async (req, res) => {
     software.updatedAt = Date.now();
     await software.save();
     await software.populate('category', 'name slug');
+    
     res.json(software);
   } catch (error) {
     console.error('Update software error:', error);
@@ -130,11 +205,18 @@ exports.updateSoftware = async (req, res) => {
 exports.deleteSoftware = async (req, res) => {
   try {
     const software = await Software.findById(req.params.id);
-    if (!software) return res.status(404).json({ message: 'Software not found' });
+    if (!software) {
+      return res.status(404).json({ message: 'Software not found' });
+    }
 
     if (software.fileInfo?.absolutePath && fs.existsSync(software.fileInfo.absolutePath)) {
-      fs.unlinkSync(software.fileInfo.absolutePath);
+      try {
+        fs.unlinkSync(software.fileInfo.absolutePath);
+      } catch (unlinkError) {
+        console.error('Failed to delete file:', unlinkError);
+      }
     }
+
     await software.deleteOne();
     res.json({ message: 'Software deleted successfully' });
   } catch (error) {
@@ -147,23 +229,42 @@ exports.deleteSoftware = async (req, res) => {
 exports.downloadSoftware = async (req, res) => {
   try {
     const software = await Software.findById(req.params.id);
-    if (!software) return res.status(404).json({ message: 'Software not found' });
+    if (!software) {
+      return res.status(404).json({ message: 'Software not found' });
+    }
+
+    console.log('📥 Download request for software:', {
+      id: software._id,
+      title: software.title,
+      isFree: software.isFree,
+      headers: req.headers.authorization ? 'Has Auth Header' : 'No Auth Header'
+    });
 
     // Free item -> stream immediately
     if (software.isFree) {
+      console.log('✅ Free software - allowing download');
       return streamFile(software, res);
     }
 
     // Check authentication
     let token = req.headers.authorization;
-    if (!token) return res.status(401).json({ message: 'Please login to download paid items' });
+    if (!token) {
+      console.log('❌ No authorization header for paid software');
+      return res.status(401).json({ message: 'Please login to download paid items' });
+    }
 
     token = token.replace(/^Bearer\s+/i, '');
+    if (!token) {
+      return res.status(401).json({ message: 'Invalid authorization header format' });
+    }
+
     let userId;
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       userId = decoded.id;
+      console.log('✅ Token verified for user:', userId);
     } catch (err) {
+      console.error('Token verification failed:', err.message);
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
@@ -177,12 +278,17 @@ exports.downloadSoftware = async (req, res) => {
 
     // If no order, try to create from a completed transaction
     if (!order) {
+      console.log('🔍 No order found, checking for completed transaction');
+      
       const transaction = await Transaction.findOne({
         user: userId,
         itemId: software._id,
         status: 'completed'
       });
+
       if (transaction) {
+        console.log('✅ Found completed transaction, creating order');
+        
         order = await Order.create({
           user: userId,
           items: [{
@@ -198,6 +304,9 @@ exports.downloadSoftware = async (req, res) => {
           status: 'completed',
           completedAt: new Date()
         });
+
+        console.log('✅ Order created from transaction:', order._id);
+        
         transaction.orderCreated = true;
         transaction.orderId = order._id;
         await transaction.save();
@@ -205,8 +314,11 @@ exports.downloadSoftware = async (req, res) => {
     }
 
     if (!order) {
+      console.log('❌ User has not purchased this software');
       return res.status(403).json({ message: 'You have not purchased this software' });
     }
+
+    console.log('✅ User has purchased this software - allowing download');
 
     // Update download count
     const item = order.items.find(i => i.itemId.toString() === software._id.toString());
@@ -218,37 +330,53 @@ exports.downloadSoftware = async (req, res) => {
 
     return streamFile(software, res);
   } catch (error) {
-    console.error('Download error:', error);
+    console.error('❌ Download error:', error);
     res.status(500).json({ message: 'Download failed' });
   }
 };
 
-// Helper to stream file
+// Helper to stream file - SAME AS DOCUMENTS
 async function streamFile(item, res) {
-  let filePath;
-  if (item.fileInfo?.relativePath) {
-    filePath = pathManager.getAbsolutePath(item.fileInfo.relativePath);
-  } else if (item.fileInfo?.absolutePath) {
-    filePath = item.fileInfo.absolutePath;
-  } else {
-    return res.status(404).json({ message: 'File path not found' });
+  try {
+    let filePath;
+    
+    // Try relative path first (new method)
+    if (item.fileInfo?.relativePath) {
+      filePath = pathManager.getAbsolutePath(item.fileInfo.relativePath);
+    } 
+    // Fallback to absolute path (old data)
+    else if (item.fileInfo?.absolutePath) {
+      filePath = item.fileInfo.absolutePath;
+    } 
+    else {
+      console.error('No file path found in item:', item._id);
+      return res.status(404).json({ message: 'File path not found' });
+    }
+
+    if (!fs.existsSync(filePath)) {
+      console.error('File not found on server:', filePath);
+      return res.status(404).json({ message: 'File not found on server' });
+    }
+
+    const stats = fs.statSync(filePath);
+    
+    const fileName = encodeURIComponent(item.fileInfo?.originalName || item.title);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Type', item.fileInfo?.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', stats.size);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    const stream = fs.createReadStream(filePath);
+    stream.pipe(res);
+
+    stream.on('error', (error) => {
+      console.error('Stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Error streaming file' });
+      }
+    });
+  } catch (error) {
+    console.error('Stream file error:', error);
+    res.status(500).json({ message: 'Error accessing file' });
   }
-
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ message: 'File not found on server' });
-  }
-
-  const stats = fs.statSync(filePath);
-  const fileName = encodeURIComponent(item.fileInfo?.originalName || item.title);
-  res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-  res.setHeader('Content-Type', item.fileInfo?.mimeType || 'application/octet-stream');
-  res.setHeader('Content-Length', stats.size);
-  res.setHeader('Cache-Control', 'no-cache');
-
-  const stream = fs.createReadStream(filePath);
-  stream.pipe(res);
-  stream.on('error', (err) => {
-    console.error('Stream error:', err);
-    if (!res.headersSent) res.status(500).json({ message: 'Error streaming file' });
-  });
 }
