@@ -16,11 +16,7 @@ exports.getStats = async (req, res) => {
       Order.countDocuments({ status: 'completed' }),
       Transaction.countDocuments({ 
         status: 'pending', 
-        paymentMethod: 'manual',
-        $or: [
-          { screenshotUrl: { $ne: null } },
-          { 'metadata.paymentConfirmation': { $exists: true, $ne: null } }
-        ]
+        paymentMethod: 'manual'
       })
     ]);
 
@@ -88,32 +84,34 @@ exports.toggleUserStatus = async (req, res) => {
   }
 };
 
-// Get pending payments – returns manual payments with either screenshot or confirmation message
+// Get pending payments – returns ALL manual pending payments
 exports.getPendingPayments = async (req, res) => {
   try {
     const payments = await Transaction.find({
       status: 'pending',
-      paymentMethod: 'manual',
-      $or: [
-        { screenshotUrl: { $ne: null } },
-        { 'metadata.paymentConfirmation': { $exists: true, $ne: null } }
-      ]
+      paymentMethod: 'manual'
     })
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 });
+
+    console.log(`📊 Found ${payments.length} pending manual payments`);
 
     const enhanced = await Promise.all(payments.map(async (p) => {
       try {
         const Model = p.itemType === 'document' ? Document : Software;
         const item = await Model.findById(p.itemId).select('title price');
+        
         return {
           ...p.toObject(),
-          itemDetails: item || { title: p.itemTitle || 'Unknown', price: p.amount }
+          itemDetails: item || { title: p.itemTitle || 'Unknown', price: p.amount },
+          // Ensure metadata is always an object
+          metadata: p.metadata || {}
         };
       } catch (err) {
         return {
           ...p.toObject(),
-          itemDetails: { title: p.itemTitle || 'Unknown', price: p.amount }
+          itemDetails: { title: p.itemTitle || 'Unknown', price: p.amount },
+          metadata: p.metadata || {}
         };
       }
     }));
@@ -140,7 +138,6 @@ exports.approvePayment = async (req, res) => {
       return res.status(404).json({ message: 'Transaction not found' });
     }
 
-    // If already completed, just return success with order
     if (transaction.status === 'completed') {
       const existingOrder = await Order.findOne({ transactionId: transaction._id });
       if (existingOrder) {
@@ -152,7 +149,6 @@ exports.approvePayment = async (req, res) => {
       }
     }
 
-    // Check if already processed
     if (transaction.status !== 'pending') {
       return res.status(400).json({ 
         message: `Transaction already ${transaction.status}` 
@@ -163,11 +159,9 @@ exports.approvePayment = async (req, res) => {
       return res.status(400).json({ message: 'Transaction has no associated user' });
     }
 
-    // Check if order already exists
     let order = await Order.findOne({ transactionId: transaction._id });
     
     if (!order) {
-      // Get item details
       let item = null;
       try {
         const Model = transaction.itemType === 'document' ? Document : Software;
@@ -186,7 +180,6 @@ exports.approvePayment = async (req, res) => {
 
       console.log('📦 Creating order for item:', item.title);
 
-      // Create order
       order = await Order.create({
         user: transaction.user._id,
         items: [{
@@ -206,7 +199,6 @@ exports.approvePayment = async (req, res) => {
       console.log('✅ Order created successfully:', order._id);
     }
 
-    // Update transaction
     transaction.status = 'completed';
     transaction.orderCreated = true;
     transaction.orderId = order._id;

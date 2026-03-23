@@ -20,11 +20,9 @@ exports.initiateSTKPush = async (req, res) => {
     const item = await Model.findById(itemId);
     if (!item) return res.status(404).json({ message: 'Item not found' });
 
-    // Check if already owned
     const existingOrder = await Order.findOne({ user: userId, 'items.itemId': itemId, status: 'completed' });
     if (existingOrder) return res.status(400).json({ message: 'You already own this item' });
 
-    // Avoid duplicate pending transactions
     const existingPending = await Transaction.findOne({
       user: userId,
       itemId,
@@ -38,7 +36,6 @@ exports.initiateSTKPush = async (req, res) => {
       });
     }
 
-    // Create transaction
     const transaction = await Transaction.create({
       user: userId,
       itemId: item._id,
@@ -155,13 +152,11 @@ exports.uploadScreenshot = async (req, res) => {
       return res.status(400).json({ message: 'No screenshot uploaded' });
     }
 
-    // Validate file type
     const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedTypes.includes(req.file.mimetype)) {
       return res.status(400).json({ message: 'Invalid file type. Please upload JPG, PNG, GIF, or WEBP image.' });
     }
 
-    // Validate size (max 10MB)
     if (req.file.size > 10 * 1024 * 1024) {
       return res.status(413).json({ message: 'Screenshot too large. Max 10MB.' });
     }
@@ -174,10 +169,16 @@ exports.uploadScreenshot = async (req, res) => {
     const relativePath = `screenshots/${req.file.filename}`;
     transaction.screenshotUrl = pathManager.getPublicUrl(relativePath);
     transaction.screenshotPath = req.file.path;
+    
+    if (!transaction.metadata) transaction.metadata = {};
     transaction.metadata.uploadedAt = new Date().toISOString();
+    transaction.metadata.uploadType = 'screenshot';
+    
     await transaction.save();
 
     console.log(`✅ Screenshot saved for transaction: ${transactionId}`);
+    console.log(`   Screenshot URL: ${transaction.screenshotUrl}`);
+    
     res.json({
       success: true,
       message: 'Screenshot uploaded. Awaiting admin verification.',
@@ -205,11 +206,16 @@ exports.submitConfirmationMessage = async (req, res) => {
     if (transaction.user.toString() !== userId) return res.status(403).json({ message: 'Not authorized' });
     if (transaction.status !== 'pending') return res.status(400).json({ message: `Payment already ${transaction.status}` });
 
+    if (!transaction.metadata) transaction.metadata = {};
     transaction.metadata.paymentConfirmation = message.trim();
     transaction.metadata.uploadedAt = new Date().toISOString();
+    transaction.metadata.uploadType = 'message';
+    
     await transaction.save();
 
     console.log(`✅ Payment confirmation message saved for transaction: ${transactionId}`);
+    console.log(`   Message: ${message.substring(0, 100)}...`);
+    
     res.json({
       success: true,
       message: 'Payment confirmation received. Awaiting admin verification.',
@@ -285,15 +291,20 @@ exports.getUserPendingTransactions = async (req, res) => {
     const userId = req.user.id;
     const pending = await Transaction.find({
       user: userId,
-      status: { $in: ['pending', 'processing'] },
-      paymentMethod: 'manual',
-      $or: [
-        { screenshotUrl: { $exists: true, $ne: null } },
-        { 'metadata.paymentConfirmation': { $exists: true, $ne: null } }
-      ]
+      status: 'pending',
+      paymentMethod: 'manual'
     }).sort({ createdAt: -1 });
 
     console.log(`📊 Found ${pending.length} pending transactions for user ${userId}`);
+    
+    pending.forEach(t => {
+      console.log(`   Transaction ${t._id}:`, {
+        hasScreenshot: !!t.screenshotUrl,
+        hasConfirmation: !!t.metadata?.paymentConfirmation,
+        status: t.status
+      });
+    });
+    
     res.json(pending);
   } catch (error) {
     console.error('Get user pending transactions error:', error);
@@ -328,7 +339,6 @@ exports.mpesaCallback = async (req, res) => {
       transaction.metadata.completedAt = new Date().toISOString();
       await transaction.save();
 
-      // Create order immediately
       const Model = transaction.itemType === 'document' ? Document : Software;
       const item = await Model.findById(transaction.itemId);
       if (item) {
