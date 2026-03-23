@@ -167,28 +167,46 @@ exports.deleteDocument = async (req, res) => {
   }
 };
 
-// Download document - with download count increments
+// Download document - with full file serving support
 exports.downloadDocument = async (req, res) => {
   try {
     const document = await Document.findById(req.params.id);
-    if (!document) return res.status(404).json({ message: 'Document not found' });
+    if (!document) {
+      console.log('❌ Document not found:', req.params.id);
+      return res.status(404).json({ message: 'Document not found' });
+    }
 
-    // If external URL, redirect
+    console.log('📥 Download request:', {
+      id: document._id,
+      title: document.title,
+      isFree: document.isFree,
+      hasFileUrl: !!document.fileUrl,
+      hasFileInfo: !!document.fileInfo
+    });
+
+    // 1. If external URL, redirect
     if (document.fileUrl && document.fileUrl.startsWith('http')) {
-      // Still increment download count for tracking
+      console.log(`🔗 Redirecting to external URL: ${document.fileUrl}`);
       document.downloadCount += 1;
       await document.save();
       return res.redirect(document.fileUrl);
     }
 
-    // Free item -> stream local file
+    // 2. Check for free item with local file
     if (document.isFree) {
-      document.downloadCount += 1;
-      await document.save();
-      return streamFile(document, res);
+      if (document.fileInfo && document.fileInfo.absolutePath) {
+        const filePath = document.fileInfo.absolutePath;
+        if (fs.existsSync(filePath)) {
+          document.downloadCount += 1;
+          await document.save();
+          return serveFile(document.fileInfo, res);
+        }
+      }
+      console.log('❌ Free document has no valid file');
+      return res.status(404).json({ message: 'File not found' });
     }
 
-    // Paid item – verify ownership
+    // 3. Paid item - verify ownership
     let token = req.headers.authorization;
     if (!token && req.query.token) token = `Bearer ${req.query.token}`;
     if (!token) return res.status(401).json({ message: 'Please login to download paid items' });
@@ -202,6 +220,7 @@ exports.downloadDocument = async (req, res) => {
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
+    // Check if user owns this item
     let order = await Order.findOne({ user: userId, 'items.itemId': document._id, 'items.itemType': 'document', status: 'completed' });
     if (!order) {
       const transaction = await Transaction.findOne({ user: userId, itemId: document._id, status: 'completed' });
@@ -229,7 +248,7 @@ exports.downloadDocument = async (req, res) => {
 
     if (!order) return res.status(403).json({ message: 'You have not purchased this document' });
 
-    // Increment order item download count
+    // Increment download counts
     const item = order.items.find(i => i.itemId.toString() === document._id.toString());
     if (item) {
       item.downloadCount += 1;
@@ -237,34 +256,48 @@ exports.downloadDocument = async (req, res) => {
       await order.save();
     }
 
-    // Increment document's overall download count
     document.downloadCount += 1;
     await document.save();
 
-    return streamFile(document, res);
+    // Serve the file
+    if (document.fileInfo && document.fileInfo.absolutePath && fs.existsSync(document.fileInfo.absolutePath)) {
+      return serveFile(document.fileInfo, res);
+    }
+
+    console.error('❌ No valid file found for purchased document');
+    return res.status(404).json({ message: 'File not found' });
+    
   } catch (error) {
     console.error('Download error:', error);
     res.status(500).json({ message: 'Download failed' });
   }
 };
 
-// Helper to stream file
-async function streamFile(item, res) {
+// Helper function to serve file
+function serveFile(fileInfo, res) {
   try {
-    let filePath = item.fileInfo?.relativePath ? pathManager.getAbsolutePath(item.fileInfo.relativePath) : item.fileInfo?.absolutePath;
-    if (!filePath || !fs.existsSync(filePath)) {
-      if (item.fileUrl && item.fileUrl.startsWith('http')) return res.redirect(item.fileUrl);
-      return res.status(404).json({ message: 'File not found' });
-    }
+    const filePath = fileInfo.absolutePath;
     const stats = fs.statSync(filePath);
-    const fileName = encodeURIComponent(item.fileInfo?.originalName || item.title);
+    const fileName = encodeURIComponent(fileInfo.originalName);
+    
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-    res.setHeader('Content-Type', item.fileInfo?.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Type', fileInfo.mimeType || 'application/octet-stream');
     res.setHeader('Content-Length', stats.size);
+    res.setHeader('Cache-Control', 'no-cache');
+    
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
+    
+    stream.on('error', (error) => {
+      console.error('Stream error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Error streaming file' });
+      }
+    });
   } catch (error) {
-    console.error('Stream error:', error);
-    res.status(500).json({ message: 'Error streaming file' });
+    console.error('Serve file error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error accessing file' });
+    }
   }
 }
