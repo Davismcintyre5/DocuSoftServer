@@ -18,9 +18,32 @@ exports.updateSettings = async (req, res) => {
     if (!settings) {
       settings = new Settings();
     }
-    Object.assign(settings, req.body);
+    
+    // Handle terms and privacy updates
+    const { termsAndConditions, privacyPolicy, requireTermsAcceptance, ...otherSettings } = req.body;
+    
+    if (termsAndConditions) {
+      settings.termsAndConditions = {
+        content: termsAndConditions,
+        lastUpdated: new Date()
+      };
+    }
+    
+    if (privacyPolicy) {
+      settings.privacyPolicy = {
+        content: privacyPolicy,
+        lastUpdated: new Date()
+      };
+    }
+    
+    if (requireTermsAcceptance !== undefined) {
+      settings.requireTermsAcceptance = requireTermsAcceptance;
+    }
+    
+    Object.assign(settings, otherSettings);
     settings.updatedAt = Date.now();
     await settings.save();
+    
     res.json(settings);
   } catch (error) {
     console.error('Update settings error:', error);

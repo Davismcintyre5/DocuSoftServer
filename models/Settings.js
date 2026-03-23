@@ -7,6 +7,18 @@ const settingsSchema = new mongoose.Schema({
   enableSTKPush: { type: Boolean, default: true },
   enableManualPayment: { type: Boolean, default: true },
   paymentInstructions: { type: String, default: 'Send money to {businessNumber} via M-Pesa, then upload screenshot' },
+  
+  // NEW: Terms & Conditions and Privacy Policy
+  termsAndConditions: {
+    content: { type: String, default: 'Default Terms and Conditions. Please update these in admin settings.' },
+    lastUpdated: { type: Date, default: Date.now }
+  },
+  privacyPolicy: {
+    content: { type: String, default: 'Default Privacy Policy. Please update these in admin settings.' },
+    lastUpdated: { type: Date, default: Date.now }
+  },
+  requireTermsAcceptance: { type: Boolean, default: true },
+  
   businessHours: {
     monday: { type: String, default: '9am-5pm' },
     tuesday: { type: String, default: '9am-5pm' },
@@ -15,8 +27,9 @@ const settingsSchema = new mongoose.Schema({
     friday: { type: String, default: '9am-5pm' },
     saturday: { type: String, default: 'Closed' },
     sunday: { type: String, default: 'Closed' }
-  }
-}, { timestamps: true });
+  },
+  updatedAt: { type: Date, default: Date.now }
+});
 
 settingsSchema.statics.getSettings = async function() {
   let settings = await this.findOne();

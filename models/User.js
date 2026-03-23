@@ -6,7 +6,12 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true, trim: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'admin'], default: 'user' },
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  // NEW: Terms acceptance tracking
+  acceptedTerms: { type: Boolean, default: false },
+  acceptedPrivacy: { type: Boolean, default: false },
+  termsAcceptedAt: { type: Date },
+  privacyAcceptedAt: { type: Date }
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
