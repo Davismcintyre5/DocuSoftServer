@@ -26,31 +26,28 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
-// ============ CORS CONFIGURATION - PRODUCTION ============
+// ============ CORS CONFIGURATION ============
 const allowedOrigins = [
   'https://docusoftstore.pxxl.click',
   'https://docusoftstore-admin.pxxl.click',
-  'https://docusoftserver.pxxl.click'
+  'https://docusoftserver.pxxl.click',
+  'http://localhost:3000',
+  'http://localhost:3001'
 ];
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || origin.endsWith('.pxxl.click')) {
-      callback(null, true);
-    } else {
-      console.warn(`⚠️ Blocked CORS request from: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type'],
-  maxAge: 86400
-}));
-
-app.options('*', cors());
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin) || (origin && origin.endsWith('.pxxl.click'))) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 // Body parsers
 app.use(express.json({ limit: '500mb' }));
@@ -65,7 +62,7 @@ app.use((req, res, next) => {
 
 app.set('trust proxy', true);
 
-// Static file serving
+// ============ STATIC FILE SERVING ============
 const uploadsPath = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsPath)) fs.mkdirSync(uploadsPath, { recursive: true });
 ['documents', 'software', 'screenshots'].forEach(dir => {
@@ -84,7 +81,44 @@ app.use('/uploads', express.static(uploadsPath, {
   }
 }));
 
-// Routes
+// ============ DEBUG / TEST ENDPOINTS ============
+app.get('/test-github', async (req, res) => {
+  try {
+    const githubService = require('./services/githubService');
+    const testBuffer = Buffer.from(`GitHub test - ${new Date().toISOString()}\nThis is a test file from DocuSoft.`);
+    const url = await githubService.uploadFile(testBuffer, 'test.txt');
+    res.json({ 
+      success: true, 
+      message: 'GitHub upload test successful',
+      url,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('GitHub test failed:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'GitHub upload test failed',
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+app.get('/debug/check-file/:type/:filename', (req, res) => {
+  const { type, filename } = req.params;
+  const filePath = path.join(uploadsPath, type, filename);
+  if (fs.existsSync(filePath)) {
+    const stats = fs.statSync(filePath);
+    res.json({ exists: true, path: filePath, size: stats.size, url: `/uploads/${type}/${filename}` });
+  } else {
+    let files = [];
+    const dirPath = path.join(uploadsPath, type);
+    if (fs.existsSync(dirPath)) files = fs.readdirSync(dirPath);
+    res.json({ exists: false, availableFiles: files.slice(0, 10) });
+  }
+});
+
+// ============ API ROUTES ============
 app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/documents', documentRoutes);
@@ -95,25 +129,30 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/upload', uploadRoutes);
 
-// Health check
+// ============ HEALTH CHECK ============
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK',
     message: 'DocuSoft Server Running',
-    environment: 'production',
+    environment: process.env.NODE_ENV || 'production',
     server: process.env.BASE_URL,
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    timestamp: new Date().toISOString()
+    github: {
+      configured: !!(process.env.GITHUB_TOKEN && process.env.GITHUB_REPO),
+      repo: process.env.GITHUB_REPO || 'not configured'
+    },
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
   });
 });
 
-// API info
+// ============ API INFO ============
 app.get('/api', (req, res) => {
   res.json({
     name: 'DocuSoft API',
     version: '1.0.0',
     status: 'running',
-    environment: 'production',
+    environment: process.env.NODE_ENV || 'production',
     endpoints: {
       auth: '/api/auth',
       categories: '/api/categories',
@@ -124,34 +163,58 @@ app.get('/api', (req, res) => {
       admin: '/api/admin',
       settings: '/api/settings',
       upload: '/api/upload',
-      health: '/health'
+      health: '/health',
+      testGithub: '/test-github'
     }
   });
 });
 
+// ============ ROOT ROUTE ============
 app.get('/', (req, res) => {
   res.json({ 
     message: 'DocuSoft API Server Running',
     version: '1.0.0',
     health: '/health',
-    api: '/api'
+    api: '/api',
+    testGithub: '/test-github'
   });
 });
 
-// 404 handler
+// ============ 404 HANDLER ============
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found', path: req.path });
+  res.status(404).json({ 
+    message: 'Route not found',
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Error handler
+// ============ GLOBAL ERROR HANDLER ============
 app.use(errorHandler);
 
+// ============ START SERVER ============
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔗 Environment: ${process.env.NODE_ENV}`);
-  console.log(`📁 Uploads: ${uploadsPath}`);
-  console.log(`✅ GitHub Integration: ${process.env.GITHUB_TOKEN ? 'Enabled' : 'Disabled'}`);
+  console.log('\n' + '='.repeat(70));
+  console.log('🚀 DocuSoft Server Running');
+  console.log('='.repeat(70));
+  console.log(`📍 Environment: ${process.env.NODE_ENV || 'production'}`);
+  console.log(`🔗 Server URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
+  console.log(`🌐 API Endpoint: ${process.env.BASE_URL || `http://localhost:${PORT}`}/api`);
+  console.log(`💚 Health Check: ${process.env.BASE_URL || `http://localhost:${PORT}`}/health`);
+  console.log(`🧪 GitHub Test: ${process.env.BASE_URL || `http://localhost:${PORT}`}/test-github`);
+  console.log(`📁 Uploads Directory: ${uploadsPath}`);
+  console.log(`💾 MongoDB: ${mongoose.connection.name} (${mongoose.connection.host})`);
+  console.log(`📡 Port: ${PORT}`);
+  console.log(`🕐 Started at: ${new Date().toISOString()}`);
+  
+  if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPO) {
+    console.log(`✅ GitHub Integration: Enabled (${process.env.GITHUB_REPO})`);
+  } else {
+    console.log(`⚠️  GitHub Integration: Disabled (missing GITHUB_TOKEN or GITHUB_REPO)`);
+  }
+  console.log('='.repeat(70) + '\n');
 });
 
 module.exports = app;

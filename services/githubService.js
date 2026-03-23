@@ -13,6 +13,7 @@ class GitHubService {
     }
     
     this.baseUrl = `https://api.github.com/repos/${this.repo}`;
+    console.log(`🔧 GitHub Service initialized for repo: ${this.repo}`);
   }
 
   async uploadFile(fileBuffer, filename) {
@@ -22,7 +23,7 @@ class GitHubService {
       const timestamp = Date.now();
       const tagName = `upload-${timestamp}`;
       
-      console.log(`📦 Creating release: ${tagName}`);
+      console.log(`📦 Creating GitHub release: ${tagName}`);
       
       // Create release
       const releaseResponse = await axios.post(
@@ -43,6 +44,8 @@ class GitHubService {
         }
       );
       
+      console.log(`✅ Release created: ${releaseResponse.data.html_url}`);
+      
       // Upload file to release
       const uploadUrl = releaseResponse.data.upload_url.replace(
         '{?name,label}',
@@ -62,6 +65,7 @@ class GitHubService {
       
       // Build download URL
       const downloadUrl = `https://github.com/${this.repo}/releases/download/${tagName}/${encodeURIComponent(cleanFilename)}`;
+      console.log(`✅ Upload complete! Download URL: ${downloadUrl}`);
       
       return downloadUrl;
     } catch (error) {

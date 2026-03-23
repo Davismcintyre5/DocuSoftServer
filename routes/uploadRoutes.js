@@ -8,10 +8,10 @@ const {
 
 const router = express.Router();
 
-// Admin-only – for documents & software
+// Admin-only route for documents & software uploads
 router.post('/github', protect, admin, uploadMiddleware, uploadToGitHub);
 
-// Any authenticated user – for screenshots
+// Any authenticated user route for screenshot uploads
 router.post('/screenshot', protect, uploadMiddleware, uploadScreenshotToGitHub);
 
 module.exports = router;
