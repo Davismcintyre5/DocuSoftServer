@@ -170,9 +170,13 @@ exports.uploadScreenshot = async (req, res) => {
     transaction.screenshotUrl = pathManager.getPublicUrl(relativePath);
     transaction.screenshotPath = req.file.path;
     
+    // Ensure metadata exists
     if (!transaction.metadata) transaction.metadata = {};
     transaction.metadata.uploadedAt = new Date().toISOString();
     transaction.metadata.uploadType = 'screenshot';
+    
+    // Mark as modified to ensure save
+    transaction.markModified('metadata');
     
     await transaction.save();
 
@@ -206,15 +210,22 @@ exports.submitConfirmationMessage = async (req, res) => {
     if (transaction.user.toString() !== userId) return res.status(403).json({ message: 'Not authorized' });
     if (transaction.status !== 'pending') return res.status(400).json({ message: `Payment already ${transaction.status}` });
 
+    // Ensure metadata exists
     if (!transaction.metadata) transaction.metadata = {};
+    
+    // Store the confirmation message
     transaction.metadata.paymentConfirmation = message.trim();
     transaction.metadata.uploadedAt = new Date().toISOString();
     transaction.metadata.uploadType = 'message';
+    
+    // Mark as modified to ensure save
+    transaction.markModified('metadata');
     
     await transaction.save();
 
     console.log(`✅ Payment confirmation message saved for transaction: ${transactionId}`);
     console.log(`   Message: ${message.substring(0, 100)}...`);
+    console.log(`   Metadata after save:`, transaction.metadata);
     
     res.json({
       success: true,
@@ -300,7 +311,8 @@ exports.getUserPendingTransactions = async (req, res) => {
     pending.forEach(t => {
       console.log(`   Transaction ${t._id}:`, {
         hasScreenshot: !!t.screenshotUrl,
-        hasConfirmation: !!t.metadata?.paymentConfirmation,
+        hasConfirmation: !!(t.metadata && t.metadata.paymentConfirmation),
+        confirmationMessage: t.metadata?.paymentConfirmation,
         status: t.status
       });
     });
@@ -373,6 +385,26 @@ exports.mpesaCallback = async (req, res) => {
   } catch (error) {
     console.error('M-Pesa callback error:', error);
     res.status(200).json({ ResultCode: 1, ResultDesc: 'Error processing callback' });
+  }
+};
+
+// ============ Debug endpoint to check transaction metadata ============
+exports.debugTransaction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const transaction = await Transaction.findById(id);
+    if (!transaction) {
+      return res.status(404).json({ message: 'Transaction not found' });
+    }
+    res.json({
+      id: transaction._id,
+      status: transaction.status,
+      screenshotUrl: transaction.screenshotUrl,
+      metadata: transaction.metadata,
+      createdAt: transaction.createdAt
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };
 
