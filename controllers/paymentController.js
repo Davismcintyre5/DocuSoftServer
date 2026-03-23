@@ -108,15 +108,15 @@ exports.initiateManualPayment = async (req, res) => {
   }
 };
 
-// Upload screenshot – receives full GitHub URL
+// Upload screenshot / payment confirmation (receives message)
 exports.uploadScreenshot = async (req, res) => {
   try {
     const { transactionId } = req.params;
-    const { screenshotUrl } = req.body;
+    const { message } = req.body;   // Now receives confirmation message
     const userId = req.user.id;
 
-    if (!screenshotUrl) {
-      return res.status(400).json({ message: 'Screenshot URL is required' });
+    if (!message) {
+      return res.status(400).json({ message: 'Payment confirmation message is required' });
     }
 
     const transaction = await Transaction.findById(transactionId);
@@ -124,25 +124,22 @@ exports.uploadScreenshot = async (req, res) => {
     if (transaction.user.toString() !== userId) return res.status(403).json({ message: 'Not authorized' });
     if (transaction.status !== 'pending') return res.status(400).json({ message: `Payment already ${transaction.status}` });
 
-    // Store the full GitHub URL
-    transaction.screenshotUrl = screenshotUrl;
+    // Store the confirmation message in metadata
+    transaction.metadata.paymentConfirmation = message;
     transaction.metadata.uploadedAt = new Date().toISOString();
     await transaction.save();
 
-    console.log(`✅ Screenshot URL saved for transaction ${transactionId}: ${screenshotUrl}`);
-
+    console.log(`✅ Payment confirmation saved for transaction: ${transactionId}`);
     res.json({
       success: true,
-      message: 'Screenshot uploaded successfully. Awaiting admin verification.',
-      transactionId: transaction._id,
-      screenshotUrl
+      message: 'Payment confirmation received. Awaiting admin verification.',
+      transactionId
     });
   } catch (error) {
-    console.error('Screenshot upload error:', error);
-    res.status(500).json({ message: 'Failed to upload screenshot' });
+    console.error('Payment confirmation error:', error);
+    res.status(500).json({ message: 'Failed to save confirmation' });
   }
 };
-
 // Check payment status for an item
 let statusCache = new Map();
 
