@@ -1,44 +1,23 @@
 const mongoose = require('mongoose');
 
 const softwareSchema = new mongoose.Schema({
-  title: {
-    type: String,
-    required: [true, 'Title is required'],
-    trim: true
-  },
-  description: {
-    type: String,
-    default: ''
-  },
-  category: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Category',
-    required: [true, 'Category is required']
-  },
-  price: {
-    type: Number,
-    required: [true, 'Price is required'],
-    min: [0, 'Price cannot be negative'],
-    default: 0
-  },
-  isFree: {
-    type: Boolean,
-    default: false
-  },
+  title: { type: String, required: true, trim: true },
+  description: { type: String, default: '' },
+  category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
+  price: { type: Number, required: true, min: 0, default: 0 },
+  isFree: { type: Boolean, default: false },
+  fileUrl: { type: String }, // GitHub URL
   fileInfo: {
-    originalName: { type: String, required: true },
-    storedName: { type: String, required: true },
-    relativePath: { type: String, required: true },
+    originalName: { type: String },
+    storedName: { type: String },
+    relativePath: { type: String },
     absolutePath: { type: String },
-    publicUrl: { type: String, required: true },
-    mimeType: { type: String, required: true },
-    size: { type: Number, required: true },
-    extension: { type: String, required: true }
+    publicUrl: { type: String },
+    mimeType: { type: String },
+    size: { type: Number },
+    extension: { type: String }
   },
-  downloadCount: {
-    type: Number,
-    default: 0
-  }
+  downloadCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
 softwareSchema.pre('save', function(next) {

@@ -8,7 +8,6 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
-// Get all documents (public)
 exports.getDocuments = async (req, res) => {
   try {
     const { category, limit } = req.query;
@@ -17,15 +16,8 @@ exports.getDocuments = async (req, res) => {
       const cat = await Category.findOne({ slug: category });
       if (cat) filter.category = cat._id;
     }
-    
-    let query = Document.find(filter)
-      .populate('category', 'name slug')
-      .sort({ createdAt: -1 });
-    
-    if (limit) {
-      query = query.limit(parseInt(limit));
-    }
-    
+    let query = Document.find(filter).populate('category', 'name slug').sort({ createdAt: -1 });
+    if (limit) query = query.limit(parseInt(limit));
     const documents = await query;
     res.json(documents);
   } catch (error) {
@@ -34,21 +26,12 @@ exports.getDocuments = async (req, res) => {
   }
 };
 
-// Get single document (public)
 exports.getDocument = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: 'Invalid document ID format' });
-    }
-
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ message: 'Invalid document ID format' });
     const document = await Document.findById(id).populate('category', 'name slug');
-    
-    if (!document) {
-      return res.status(404).json({ message: 'Document not found' });
-    }
-
+    if (!document) return res.status(404).json({ message: 'Document not found' });
     res.json(document);
   } catch (error) {
     console.error('Get document error:', error);
@@ -56,119 +39,55 @@ exports.getDocument = async (req, res) => {
   }
 };
 
-// Create document (admin)
 exports.createDocument = async (req, res) => {
   try {
-    const { title, description, category, price, isFree } = req.body;
-    const file = req.file;
-
+    const { title, description, category, price, isFree, fileUrl } = req.body;
     if (!title) return res.status(400).json({ message: 'Title is required' });
     if (!category) return res.status(400).json({ message: 'Category is required' });
-    if (!file) return res.status(400).json({ message: 'File is required' });
+    if (!fileUrl) return res.status(400).json({ message: 'File URL is required' });
 
     const categoryExists = await Category.findById(category);
-    if (!categoryExists) {
-      return res.status(400).json({ message: 'Category does not exist' });
-    }
+    if (!categoryExists) return res.status(400).json({ message: 'Category does not exist' });
 
     const isFreeBool = isFree === 'true' || isFree === true;
     const priceNum = isFreeBool ? 0 : Number(price);
-    
     if (!isFreeBool && (!price || isNaN(priceNum) || priceNum <= 0)) {
       return res.status(400).json({ message: 'Price must be greater than 0 for paid items' });
     }
 
-    const relativePath = `documents/${file.filename}`;
-    const fileInfo = {
-      originalName: file.originalname,
-      storedName: file.filename,
-      relativePath: relativePath,
-      absolutePath: file.path.replace(/\\/g, '/'),
-      publicUrl: pathManager.getPublicUrl(relativePath),
-      mimeType: file.mimetype,
-      size: file.size,
-      extension: path.extname(file.originalname)
-    };
-
-    const document = new Document({
-      title,
-      description: description || '',
-      category,
-      price: priceNum,
-      isFree: isFreeBool,
-      fileInfo,
-      downloadCount: 0
-    });
-
-    const savedDocument = await document.save();
-    await savedDocument.populate('category', 'name slug');
-
-    res.status(201).json(savedDocument);
+    const document = new Document({ title, description: description || '', category, price: priceNum, isFree: isFreeBool, fileUrl, downloadCount: 0 });
+    await document.save();
+    await document.populate('category', 'name slug');
+    res.status(201).json(document);
   } catch (error) {
     console.error('Create document error:', error);
     res.status(500).json({ message: 'Failed to create document' });
   }
 };
 
-// Update document (admin)
 exports.updateDocument = async (req, res) => {
   try {
-    const { title, description, category, price, isFree } = req.body;
-    const file = req.file;
-
+    const { title, description, category, price, isFree, fileUrl } = req.body;
     const document = await Document.findById(req.params.id);
-    if (!document) {
-      return res.status(404).json({ message: 'Document not found' });
-    }
+    if (!document) return res.status(404).json({ message: 'Document not found' });
 
     if (title) document.title = title;
     if (description !== undefined) document.description = description;
-    
     if (category) {
-      const categoryExists = await Category.findById(category);
-      if (!categoryExists) {
-        return res.status(400).json({ message: 'Category does not exist' });
-      }
+      const cat = await Category.findById(category);
+      if (!cat) return res.status(400).json({ message: 'Category does not exist' });
       document.category = category;
     }
-    
     if (isFree !== undefined) {
       document.isFree = isFree === 'true' || isFree === true;
-      if (document.isFree) {
-        document.price = 0;
-      } else if (price) {
-        document.price = Number(price);
-      }
-    } else if (price) {
-      document.price = Number(price);
-    }
-
-    if (file) {
-      if (document.fileInfo?.absolutePath && fs.existsSync(document.fileInfo.absolutePath)) {
-        try {
-          fs.unlinkSync(document.fileInfo.absolutePath);
-        } catch (unlinkError) {
-          console.error('Failed to delete old file:', unlinkError);
-        }
-      }
-
-      const relativePath = `documents/${file.filename}`;
-      document.fileInfo = {
-        originalName: file.originalname,
-        storedName: file.filename,
-        relativePath: relativePath,
-        absolutePath: file.path.replace(/\\/g, '/'),
-        publicUrl: pathManager.getPublicUrl(relativePath),
-        mimeType: file.mimetype,
-        size: file.size,
-        extension: path.extname(file.originalname)
-      };
-    }
+      if (document.isFree) document.price = 0;
+      else if (price) document.price = Number(price);
+    } else if (price) document.price = Number(price);
+    if (fileUrl) document.fileUrl = fileUrl;
 
     document.updatedAt = Date.now();
     await document.save();
     await document.populate('category', 'name slug');
-    
     res.json(document);
   } catch (error) {
     console.error('Update document error:', error);
@@ -176,22 +95,13 @@ exports.updateDocument = async (req, res) => {
   }
 };
 
-// Delete document (admin)
 exports.deleteDocument = async (req, res) => {
   try {
     const document = await Document.findById(req.params.id);
-    if (!document) {
-      return res.status(404).json({ message: 'Document not found' });
-    }
-
+    if (!document) return res.status(404).json({ message: 'Document not found' });
     if (document.fileInfo?.absolutePath && fs.existsSync(document.fileInfo.absolutePath)) {
-      try {
-        fs.unlinkSync(document.fileInfo.absolutePath);
-      } catch (unlinkError) {
-        console.error('Failed to delete file:', unlinkError);
-      }
+      fs.unlinkSync(document.fileInfo.absolutePath);
     }
-
     await document.deleteOne();
     res.json({ message: 'Document deleted successfully' });
   } catch (error) {
@@ -200,103 +110,54 @@ exports.deleteDocument = async (req, res) => {
   }
 };
 
-// Download document - FIXED
 exports.downloadDocument = async (req, res) => {
   try {
     const document = await Document.findById(req.params.id);
-    if (!document) {
-      console.log('❌ Document not found:', req.params.id);
-      return res.status(404).json({ message: 'Document not found' });
+    if (!document) return res.status(404).json({ message: 'Document not found' });
+
+    // GitHub URL redirect
+    if (document.fileUrl && document.fileUrl.startsWith('http')) {
+      return res.redirect(document.fileUrl);
     }
 
-    console.log('📥 Download request:', {
-      id: document._id,
-      title: document.title,
-      isFree: document.isFree,
-      hasAuthHeader: !!req.headers.authorization
-    });
+    // Free item -> stream
+    if (document.isFree) return streamFile(document, res);
 
-    // Free item -> stream immediately
-    if (document.isFree) {
-      console.log('✅ Free document - allowing download');
-      return streamFile(document, res);
-    }
-
-    // Check authentication for paid items
+    // Token from header or query
     let token = req.headers.authorization;
-    if (!token) {
-      console.log('❌ No authorization header for paid document');
-      return res.status(401).json({ message: 'Please login to download paid items' });
-    }
+    if (!token && req.query.token) token = `Bearer ${req.query.token}`;
+    if (!token) return res.status(401).json({ message: 'Please login to download paid items' });
 
     token = token.replace(/^Bearer\s+/i, '');
-    if (!token) {
-      return res.status(401).json({ message: 'Invalid authorization header format' });
-    }
-
     let userId;
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       userId = decoded.id;
-      console.log('✅ Token verified for user:', userId);
     } catch (err) {
-      console.error('Token verification failed:', err.message);
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
-    // Check if order exists
-    let order = await Order.findOne({
-      user: userId,
-      'items.itemId': document._id,
-      'items.itemType': 'document',
-      status: 'completed'
-    });
-
-    // If no order, try to create from a completed transaction
+    let order = await Order.findOne({ user: userId, 'items.itemId': document._id, 'items.itemType': 'document', status: 'completed' });
     if (!order) {
-      console.log('🔍 No order found, checking for completed transaction');
-      
-      const transaction = await Transaction.findOne({
-        user: userId,
-        itemId: document._id,
-        status: 'completed'
-      });
-
+      const transaction = await Transaction.findOne({ user: userId, itemId: document._id, status: 'completed' });
       if (transaction) {
-        console.log('✅ Found completed transaction, creating order');
-        
         order = await Order.create({
           user: userId,
-          items: [{
-            itemId: document._id,
-            itemType: 'document',
-            title: document.title,
-            price: document.price,
-            downloadCount: 0
-          }],
+          items: [{ itemId: document._id, itemType: 'document', title: document.title, price: document.price, downloadCount: 0 }],
           totalAmount: document.price,
           paymentMethod: transaction.paymentMethod,
           transactionId: transaction._id,
           status: 'completed',
           completedAt: new Date()
         });
-
-        console.log('✅ Order created from transaction:', order._id);
-        
         transaction.orderCreated = true;
         transaction.orderId = order._id;
         await transaction.save();
       }
     }
 
-    if (!order) {
-      console.log('❌ User has not purchased this document');
-      return res.status(403).json({ message: 'You have not purchased this document' });
-    }
+    if (!order) return res.status(403).json({ message: 'You have not purchased this document' });
 
-    console.log('✅ User has purchased this document - allowing download');
-
-    // Update download count
     const item = order.items.find(i => i.itemId.toString() === document._id.toString());
     if (item) {
       item.downloadCount += 1;
@@ -307,54 +168,26 @@ exports.downloadDocument = async (req, res) => {
     return streamFile(document, res);
   } catch (error) {
     console.error('Download error:', error);
-    res.status(500).json({ message: 'Download failed: ' + error.message });
+    res.status(500).json({ message: 'Download failed' });
   }
 };
 
-// Helper to stream file
 async function streamFile(item, res) {
   try {
-    let filePath;
-    
-    // Try relative path first (new method)
-    if (item.fileInfo?.relativePath) {
-      filePath = pathManager.getAbsolutePath(item.fileInfo.relativePath);
-    } 
-    // Fallback to absolute path (old data)
-    else if (item.fileInfo?.absolutePath) {
-      filePath = item.fileInfo.absolutePath;
-    } 
-    else {
-      console.error('No file path found in item:', item._id);
-      return res.status(404).json({ message: 'File path not found' });
+    let filePath = item.fileInfo?.relativePath ? pathManager.getAbsolutePath(item.fileInfo.relativePath) : item.fileInfo?.absolutePath;
+    if (!filePath || !fs.existsSync(filePath)) {
+      if (item.fileUrl && item.fileUrl.startsWith('http')) return res.redirect(item.fileUrl);
+      return res.status(404).json({ message: 'File not found' });
     }
-
-    console.log('📁 Looking for file at:', filePath);
-
-    if (!fs.existsSync(filePath)) {
-      console.error('File not found on server:', filePath);
-      return res.status(404).json({ message: 'File not found on server' });
-    }
-
     const stats = fs.statSync(filePath);
-    
     const fileName = encodeURIComponent(item.fileInfo?.originalName || item.title);
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader('Content-Type', item.fileInfo?.mimeType || 'application/octet-stream');
     res.setHeader('Content-Length', stats.size);
-    res.setHeader('Cache-Control', 'no-cache');
-
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
-
-    stream.on('error', (error) => {
-      console.error('Stream error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ message: 'Error streaming file' });
-      }
-    });
   } catch (error) {
-    console.error('Stream file error:', error);
-    res.status(500).json({ message: 'Error accessing file' });
+    console.error('Stream error:', error);
+    res.status(500).json({ message: 'Error streaming file' });
   }
 }
