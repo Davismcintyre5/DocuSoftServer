@@ -19,4 +19,14 @@ const orderSchema = new mongoose.Schema({
   completedAt: Date
 }, { timestamps: true });
 
+// Helper method to check if user can download an item
+orderSchema.methods.canDownload = function(itemId) {
+  const item = this.items.find(i => i.itemId.toString() === itemId.toString());
+  return !!item && this.status === 'completed';
+};
+
+// Indexes
+orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ status: 1 });
+
 module.exports = mongoose.model('Order', orderSchema);

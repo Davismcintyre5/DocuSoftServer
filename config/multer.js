@@ -2,7 +2,7 @@ const multer = require('multer');
 const path = require('path');
 const { ensureDirectoryExists, baseDir } = require('./pathManager');
 
-// ============ DOCUMENT STORAGE ============
+// Document storage
 const documentStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = path.join(baseDir, 'documents');
@@ -15,7 +15,7 @@ const documentStorage = multer.diskStorage({
   }
 });
 
-// ============ SOFTWARE STORAGE ============
+// Software storage
 const softwareStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = path.join(baseDir, 'software');
@@ -28,7 +28,7 @@ const softwareStorage = multer.diskStorage({
   }
 });
 
-// ============ SCREENSHOT STORAGE ============
+// Screenshot storage
 const screenshotStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = path.join(baseDir, 'screenshots');
@@ -41,45 +41,33 @@ const screenshotStorage = multer.diskStorage({
   }
 });
 
-// ============ FILE FILTERS ============
+// File filters
 const documentFileFilter = (req, file, cb) => {
-  const allowed = [
-    '.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt',
-    '.zip', '.rar'               // <-- ADDED ZIP AND RAR
-  ];
+  const allowed = ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.zip', '.rar'];
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowed.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`Invalid file type. Allowed: ${allowed.join(', ')}`));
-  }
+  if (allowed.includes(ext)) cb(null, true);
+  else cb(new Error(`Invalid file type. Allowed: ${allowed.join(', ')}`));
 };
 
 const softwareFileFilter = (req, file, cb) => {
   const allowed = ['.zip', '.rar', '.exe', '.msi', '.dmg', '.pkg', '.appimage', '.deb'];
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowed.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error(`Invalid file type. Allowed: ${allowed.join(', ')}`));
-  }
+  if (allowed.includes(ext)) cb(null, true);
+  else cb(new Error(`Invalid file type. Allowed: ${allowed.join(', ')}`));
 };
 
 const screenshotFileFilter = (req, file, cb) => {
   const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
   const ext = path.extname(file.originalname).toLowerCase();
-  if (allowed.includes(ext)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only JPG, PNG, GIF, WEBP allowed.'));
-  }
+  if (allowed.includes(ext)) cb(null, true);
+  else cb(new Error('Invalid file type. Only JPG, PNG, GIF, WEBP allowed.'));
 };
 
-// ============ MULTER INSTANCES ============
+// Multer instances
 const uploadDocument = multer({
   storage: documentStorage,
   fileFilter: documentFileFilter,
-  limits: { fileSize: 500 * 1024 * 1024 } // 500MB for documents
+  limits: { fileSize: 500 * 1024 * 1024 }
 });
 
 const uploadSoftware = multer({
@@ -97,7 +85,7 @@ const uploadScreenshot = multer({
 const handleMulterError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ message: 'File too large. Maximum size is 500MB.' });
+      return res.status(413).json({ message: 'File too large.' });
     }
     return res.status(400).json({ message: err.message });
   }

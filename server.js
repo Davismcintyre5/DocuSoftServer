@@ -85,22 +85,11 @@ app.use('/uploads', express.static(uploadsPath, {
 app.get('/test-github', async (req, res) => {
   try {
     const githubService = require('./services/githubService');
-    const testBuffer = Buffer.from(`GitHub test - ${new Date().toISOString()}\nThis is a test file from DocuSoft.`);
+    const testBuffer = Buffer.from(`GitHub test - ${new Date().toISOString()}\n`);
     const url = await githubService.uploadFile(testBuffer, 'test.txt');
-    res.json({ 
-      success: true, 
-      message: 'GitHub upload test successful',
-      url,
-      timestamp: new Date().toISOString()
-    });
+    res.json({ success: true, url });
   } catch (error) {
-    console.error('GitHub test failed:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'GitHub upload test failed',
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -131,18 +120,13 @@ app.use('/api/upload', uploadRoutes);
 
 // ============ HEALTH CHECK ============
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'OK',
     message: 'DocuSoft Server Running',
     environment: process.env.NODE_ENV || 'production',
     server: process.env.BASE_URL,
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    github: {
-      configured: !!(process.env.GITHUB_TOKEN && process.env.GITHUB_REPO),
-      repo: process.env.GITHUB_REPO || 'not configured'
-    },
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -169,9 +153,8 @@ app.get('/api', (req, res) => {
   });
 });
 
-// ============ ROOT ROUTE ============
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'DocuSoft API Server Running',
     version: '1.0.0',
     health: '/health',
@@ -182,12 +165,7 @@ app.get('/', (req, res) => {
 
 // ============ 404 HANDLER ============
 app.use((req, res) => {
-  res.status(404).json({ 
-    message: 'Route not found',
-    path: req.path,
-    method: req.method,
-    timestamp: new Date().toISOString()
-  });
+  res.status(404).json({ message: 'Route not found', path: req.path });
 });
 
 // ============ GLOBAL ERROR HANDLER ============
@@ -196,25 +174,8 @@ app.use(errorHandler);
 // ============ START SERVER ============
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log('\n' + '='.repeat(70));
-  console.log('🚀 DocuSoft Server Running');
-  console.log('='.repeat(70));
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'production'}`);
-  console.log(`🔗 Server URL: ${process.env.BASE_URL || `http://localhost:${PORT}`}`);
-  console.log(`🌐 API Endpoint: ${process.env.BASE_URL || `http://localhost:${PORT}`}/api`);
-  console.log(`💚 Health Check: ${process.env.BASE_URL || `http://localhost:${PORT}`}/health`);
-  console.log(`🧪 GitHub Test: ${process.env.BASE_URL || `http://localhost:${PORT}`}/test-github`);
-  console.log(`📁 Uploads Directory: ${uploadsPath}`);
-  console.log(`💾 MongoDB: ${mongoose.connection.name} (${mongoose.connection.host})`);
-  console.log(`📡 Port: ${PORT}`);
-  console.log(`🕐 Started at: ${new Date().toISOString()}`);
-  
-  if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPO) {
-    console.log(`✅ GitHub Integration: Enabled (${process.env.GITHUB_REPO})`);
-  } else {
-    console.log(`⚠️  GitHub Integration: Disabled (missing GITHUB_TOKEN or GITHUB_REPO)`);
-  }
-  console.log('='.repeat(70) + '\n');
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🔗 Environment: ${process.env.NODE_ENV || 'production'}`);
+  console.log(`📁 Uploads: ${uploadsPath}`);
+  console.log(`✅ Payment routes: /api/payments`);
 });
-
-module.exports = app;

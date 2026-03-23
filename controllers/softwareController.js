@@ -8,6 +8,7 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
+// Get all software (public)
 exports.getSoftware = async (req, res) => {
   try {
     const { category, limit } = req.query;
@@ -26,6 +27,7 @@ exports.getSoftware = async (req, res) => {
   }
 };
 
+// Get single software (public)
 exports.getSoftwareItem = async (req, res) => {
   try {
     const { id } = req.params;
@@ -39,12 +41,15 @@ exports.getSoftwareItem = async (req, res) => {
   }
 };
 
+// Create software (admin)
 exports.createSoftware = async (req, res) => {
   try {
     const { title, description, category, price, isFree, fileUrl } = req.body;
+    const file = req.file;
+
     if (!title) return res.status(400).json({ message: 'Title is required' });
     if (!category) return res.status(400).json({ message: 'Category is required' });
-    if (!fileUrl) return res.status(400).json({ message: 'File URL is required' });
+    if (!file && !fileUrl) return res.status(400).json({ message: 'Either a file or an external URL is required' });
 
     const categoryExists = await Category.findById(category);
     if (!categoryExists) return res.status(400).json({ message: 'Category does not exist' });
@@ -55,7 +60,37 @@ exports.createSoftware = async (req, res) => {
       return res.status(400).json({ message: 'Price must be greater than 0 for paid items' });
     }
 
-    const software = new Software({ title, description: description || '', category, price: priceNum, isFree: isFreeBool, fileUrl, downloadCount: 0 });
+    let finalFileUrl = null;
+    let fileInfo = null;
+
+    if (file) {
+      const relativePath = `software/${file.filename}`;
+      fileInfo = {
+        originalName: file.originalname,
+        storedName: file.filename,
+        relativePath,
+        absolutePath: file.path,
+        publicUrl: `${process.env.BASE_URL}/uploads/${relativePath}`,
+        mimeType: file.mimetype,
+        size: file.size,
+        extension: path.extname(file.originalname)
+      };
+      finalFileUrl = fileInfo.publicUrl;
+    } else if (fileUrl) {
+      finalFileUrl = fileUrl;
+    }
+
+    const software = new Software({
+      title,
+      description: description || '',
+      category,
+      price: priceNum,
+      isFree: isFreeBool,
+      fileUrl: finalFileUrl,
+      fileInfo,
+      downloadCount: 0
+    });
+
     await software.save();
     await software.populate('category', 'name slug');
     res.status(201).json(software);
@@ -65,9 +100,12 @@ exports.createSoftware = async (req, res) => {
   }
 };
 
+// Update software (admin)
 exports.updateSoftware = async (req, res) => {
   try {
     const { title, description, category, price, isFree, fileUrl } = req.body;
+    const file = req.file;
+
     const software = await Software.findById(req.params.id);
     if (!software) return res.status(404).json({ message: 'Software not found' });
 
@@ -85,6 +123,24 @@ exports.updateSoftware = async (req, res) => {
     } else if (price) software.price = Number(price);
     if (fileUrl) software.fileUrl = fileUrl;
 
+    if (file) {
+      if (software.fileInfo?.absolutePath && fs.existsSync(software.fileInfo.absolutePath)) {
+        fs.unlinkSync(software.fileInfo.absolutePath);
+      }
+      const relativePath = `software/${file.filename}`;
+      software.fileInfo = {
+        originalName: file.originalname,
+        storedName: file.filename,
+        relativePath,
+        absolutePath: file.path,
+        publicUrl: `${process.env.BASE_URL}/uploads/${relativePath}`,
+        mimeType: file.mimetype,
+        size: file.size,
+        extension: path.extname(file.originalname)
+      };
+      software.fileUrl = software.fileInfo.publicUrl;
+    }
+
     software.updatedAt = Date.now();
     await software.save();
     await software.populate('category', 'name slug');
@@ -95,6 +151,7 @@ exports.updateSoftware = async (req, res) => {
   }
 };
 
+// Delete software (admin)
 exports.deleteSoftware = async (req, res) => {
   try {
     const software = await Software.findById(req.params.id);
@@ -110,17 +167,27 @@ exports.deleteSoftware = async (req, res) => {
   }
 };
 
+// Download software - with download count increments
 exports.downloadSoftware = async (req, res) => {
   try {
     const software = await Software.findById(req.params.id);
     if (!software) return res.status(404).json({ message: 'Software not found' });
 
+    // If external URL, redirect
     if (software.fileUrl && software.fileUrl.startsWith('http')) {
+      software.downloadCount += 1;
+      await software.save();
       return res.redirect(software.fileUrl);
     }
 
-    if (software.isFree) return streamFile(software, res);
+    // Free item -> stream local file
+    if (software.isFree) {
+      software.downloadCount += 1;
+      await software.save();
+      return streamFile(software, res);
+    }
 
+    // Paid item – verify ownership
     let token = req.headers.authorization;
     if (!token && req.query.token) token = `Bearer ${req.query.token}`;
     if (!token) return res.status(401).json({ message: 'Please login to download paid items' });
@@ -130,7 +197,7 @@ exports.downloadSoftware = async (req, res) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       userId = decoded.id;
-    } catch (err) {
+    } catch {
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
@@ -140,7 +207,13 @@ exports.downloadSoftware = async (req, res) => {
       if (transaction) {
         order = await Order.create({
           user: userId,
-          items: [{ itemId: software._id, itemType: 'software', title: software.title, price: software.price, downloadCount: 0 }],
+          items: [{
+            itemId: software._id,
+            itemType: 'software',
+            title: software.title,
+            price: software.price,
+            downloadCount: 0
+          }],
           totalAmount: software.price,
           paymentMethod: transaction.paymentMethod,
           transactionId: transaction._id,
@@ -155,12 +228,17 @@ exports.downloadSoftware = async (req, res) => {
 
     if (!order) return res.status(403).json({ message: 'You have not purchased this software' });
 
+    // Increment order item download count
     const item = order.items.find(i => i.itemId.toString() === software._id.toString());
     if (item) {
       item.downloadCount += 1;
       item.lastDownloaded = new Date();
       await order.save();
     }
+
+    // Increment software's overall download count
+    software.downloadCount += 1;
+    await software.save();
 
     return streamFile(software, res);
   } catch (error) {
@@ -169,6 +247,7 @@ exports.downloadSoftware = async (req, res) => {
   }
 };
 
+// Helper to stream file
 async function streamFile(item, res) {
   try {
     let filePath = item.fileInfo?.relativePath ? pathManager.getAbsolutePath(item.fileInfo.relativePath) : item.fileInfo?.absolutePath;

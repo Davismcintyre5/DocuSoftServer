@@ -16,8 +16,11 @@ exports.getStats = async (req, res) => {
       Order.countDocuments({ status: 'completed' }),
       Transaction.countDocuments({ 
         status: 'pending', 
-        paymentMethod: 'manual', 
-        screenshotUrl: { $ne: null } 
+        paymentMethod: 'manual',
+        $or: [
+          { screenshotUrl: { $ne: null } },
+          { 'metadata.paymentConfirmation': { $exists: true, $ne: null } }
+        ]
       })
     ]);
 
@@ -85,13 +88,16 @@ exports.toggleUserStatus = async (req, res) => {
   }
 };
 
-// Get pending payments
+// Get pending payments – returns manual payments with either screenshot or confirmation message
 exports.getPendingPayments = async (req, res) => {
   try {
     const payments = await Transaction.find({
       status: 'pending',
       paymentMethod: 'manual',
-      screenshotUrl: { $ne: null }
+      $or: [
+        { screenshotUrl: { $ne: null } },
+        { 'metadata.paymentConfirmation': { $exists: true, $ne: null } }
+      ]
     })
       .populate('user', 'name email phone')
       .sort({ createdAt: -1 });
