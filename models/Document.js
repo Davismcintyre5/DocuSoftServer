@@ -6,16 +6,18 @@ const documentSchema = new mongoose.Schema({
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   price: { type: Number, required: true, min: 0, default: 0 },
   isFree: { type: Boolean, default: false },
-  fileUrl: { type: String }, // GitHub URL
+  // Primary file source – external URL or local public URL
+  fileUrl: { type: String },
+  // fileInfo is optional – only for local uploads
   fileInfo: {
-    originalName: { type: String },
-    storedName: { type: String },
-    relativePath: { type: String },
-    absolutePath: { type: String },
-    publicUrl: { type: String },
-    mimeType: { type: String },
-    size: { type: Number },
-    extension: { type: String },
+    originalName: String,
+    storedName: String,
+    relativePath: String,
+    absolutePath: String,
+    publicUrl: String,
+    mimeType: String,
+    size: Number,
+    extension: String,
     fileType: { type: String, enum: ['document', 'archive'], default: 'document' }
   },
   downloadCount: { type: Number, default: 0 }
