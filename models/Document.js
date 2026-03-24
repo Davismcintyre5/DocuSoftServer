@@ -6,9 +6,9 @@ const documentSchema = new mongoose.Schema({
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   price: { type: Number, required: true, min: 0, default: 0 },
   isFree: { type: Boolean, default: false },
-  // Primary file source – external URL or local public URL
+  // External URL (GitHub, etc.) – primary source
   fileUrl: { type: String },
-  // fileInfo is optional – only for local uploads
+  // Local file info – optional, only for uploaded files
   fileInfo: {
     originalName: String,
     storedName: String,
@@ -25,11 +25,10 @@ const documentSchema = new mongoose.Schema({
 
 documentSchema.pre('save', function(next) {
   if (this.isFree) this.price = 0;
-  const archiveExts = ['.zip', '.rar', '.7z', '.tar', '.gz'];
-  if (this.fileInfo && archiveExts.includes(this.fileInfo.extension?.toLowerCase())) {
-    this.fileInfo.fileType = 'archive';
-  } else if (this.fileInfo) {
-    this.fileInfo.fileType = 'document';
+  // Auto-detect fileType if fileInfo exists
+  if (this.fileInfo && this.fileInfo.extension) {
+    const archiveExts = ['.zip', '.rar', '.7z', '.tar', '.gz'];
+    this.fileInfo.fileType = archiveExts.includes(this.fileInfo.extension.toLowerCase()) ? 'archive' : 'document';
   }
   next();
 });
