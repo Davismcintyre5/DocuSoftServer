@@ -8,17 +8,30 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
-// Get all software (public)
+// Get all software (public) – with regex search
 exports.getSoftware = async (req, res) => {
   try {
-    const { category, limit } = req.query;
+    const { category, limit, search } = req.query;
     let filter = {};
+
+    // Category filter
     if (category) {
       const cat = await Category.findOne({ slug: category });
       if (cat) filter.category = cat._id;
     }
+
+    // Search filter (case‑insensitive regex, partial match)
+    if (search && search.trim()) {
+      const searchRegex = new RegExp(search.trim(), 'i');
+      filter.$or = [
+        { title: searchRegex },
+        { description: searchRegex }
+      ];
+    }
+
     let query = Software.find(filter).populate('category', 'name slug').sort({ createdAt: -1 });
     if (limit) query = query.limit(parseInt(limit));
+
     const software = await query;
     res.json(software);
   } catch (error) {
@@ -167,46 +180,27 @@ exports.deleteSoftware = async (req, res) => {
   }
 };
 
-// Download software - with full file serving support
+// Download software
 exports.downloadSoftware = async (req, res) => {
   try {
     const software = await Software.findById(req.params.id);
-    if (!software) {
-      console.log('❌ Software not found:', req.params.id);
-      return res.status(404).json({ message: 'Software not found' });
-    }
+    if (!software) return res.status(404).json({ message: 'Software not found' });
 
-    console.log('📥 Download request for software:', {
-      id: software._id,
-      title: software.title,
-      isFree: software.isFree,
-      hasFileUrl: !!software.fileUrl,
-      hasFileInfo: !!software.fileInfo
-    });
-
-    // 1. If external URL, redirect
     if (software.fileUrl && software.fileUrl.startsWith('http')) {
-      console.log(`🔗 Redirecting to external URL: ${software.fileUrl}`);
       software.downloadCount += 1;
       await software.save();
       return res.redirect(software.fileUrl);
     }
 
-    // 2. Check for free item with local file
     if (software.isFree) {
-      if (software.fileInfo && software.fileInfo.absolutePath) {
-        const filePath = software.fileInfo.absolutePath;
-        if (fs.existsSync(filePath)) {
-          software.downloadCount += 1;
-          await software.save();
-          return serveFile(software.fileInfo, res);
-        }
+      if (software.fileInfo && software.fileInfo.absolutePath && fs.existsSync(software.fileInfo.absolutePath)) {
+        software.downloadCount += 1;
+        await software.save();
+        return serveFile(software.fileInfo, res);
       }
-      console.log('❌ Free software has no valid file');
       return res.status(404).json({ message: 'File not found' });
     }
 
-    // 3. Paid item - verify ownership
     let token = req.headers.authorization;
     if (!token && req.query.token) token = `Bearer ${req.query.token}`;
     if (!token) return res.status(401).json({ message: 'Please login to download paid items' });
@@ -220,7 +214,6 @@ exports.downloadSoftware = async (req, res) => {
       return res.status(401).json({ message: 'Invalid or expired token' });
     }
 
-    // Check if user owns this item
     let order = await Order.findOne({ user: userId, 'items.itemId': software._id, 'items.itemType': 'software', status: 'completed' });
     if (!order) {
       const transaction = await Transaction.findOne({ user: userId, itemId: software._id, status: 'completed' });
@@ -248,7 +241,6 @@ exports.downloadSoftware = async (req, res) => {
 
     if (!order) return res.status(403).json({ message: 'You have not purchased this software' });
 
-    // Increment download counts
     const item = order.items.find(i => i.itemId.toString() === software._id.toString());
     if (item) {
       item.downloadCount += 1;
@@ -259,45 +251,29 @@ exports.downloadSoftware = async (req, res) => {
     software.downloadCount += 1;
     await software.save();
 
-    // Serve the file
     if (software.fileInfo && software.fileInfo.absolutePath && fs.existsSync(software.fileInfo.absolutePath)) {
       return serveFile(software.fileInfo, res);
     }
 
-    console.error('❌ No valid file found for purchased software');
     return res.status(404).json({ message: 'File not found' });
-    
   } catch (error) {
     console.error('Download error:', error);
     res.status(500).json({ message: 'Download failed' });
   }
 };
 
-// Helper function to serve file
 function serveFile(fileInfo, res) {
   try {
     const filePath = fileInfo.absolutePath;
     const stats = fs.statSync(filePath);
     const fileName = encodeURIComponent(fileInfo.originalName);
-    
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     res.setHeader('Content-Type', fileInfo.mimeType || 'application/octet-stream');
     res.setHeader('Content-Length', stats.size);
-    res.setHeader('Cache-Control', 'no-cache');
-    
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
-    
-    stream.on('error', (error) => {
-      console.error('Stream error:', error);
-      if (!res.headersSent) {
-        res.status(500).json({ message: 'Error streaming file' });
-      }
-    });
   } catch (error) {
     console.error('Serve file error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ message: 'Error accessing file' });
-    }
+    if (!res.headersSent) res.status(500).json({ message: 'Error streaming file' });
   }
 }
