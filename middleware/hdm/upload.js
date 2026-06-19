@@ -1,19 +1,6 @@
 const multer = require('multer');
-const path = require('path');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    let folder = 'uploads/hdm/photos';
-    if (req.originalUrl.includes('logo')) folder = 'uploads/hdm/logos';
-    if (req.originalUrl.includes('app')) folder = 'uploads/hdm/apps';
-    if (req.originalUrl.includes('project')) folder = 'uploads/hdm/projects';
-    cb(null, folder);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1e9) + path.extname(file.originalname);
-    cb(null, uniqueName);
-  }
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
