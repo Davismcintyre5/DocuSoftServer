@@ -3,12 +3,12 @@ const axios = require('axios');
 const sendMessage = async (baseUrl, apiKey, message, source, context) => {
   try {
     const response = await axios.post(
-      `${baseUrl}/widget/chat`,
-      { message, source, context },
+      `${baseUrl}/projects/widget/chat`,
+      { message, source, provider: 'groq', context },
       {
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey
+          'Authorization': `Bearer ${apiKey}`
         },
         timeout: 15000
       }

@@ -30,14 +30,14 @@ const settingsSchema = new mongoose.Schema({
     sunday: { type: String, default: 'Closed' }
   },
 
-  ai: {
-    enabled: { type: Boolean, default: false },
-    baseUrl: { type: String, default: 'https://hdmai-server.onrender.com/api/v1' },
-    apiKey: { type: String, default: '', select: false },
-    greeting: { type: String, default: "Hello! Ask me about our documents, software, pricing, or payment methods." },
-    widgetColor: { type: String, default: '#0a5c8e' },
-    widgetPosition: { type: String, enum: ['left', 'right'], default: 'right' }
-  },
+ai: {
+  enabled: { type: Boolean, default: false },
+  baseUrl: { type: String, default: 'https://hdmaiserver.pxxl.click/api/v1' },
+  apiKey: { type: String, default: '', select: false },
+  greeting: { type: String, default: "Hello! Ask me about our documents, software, pricing, or payment methods." },
+  widgetColor: { type: String, default: '#0a5c8e' },
+  widgetPosition: { type: String, enum: ['left', 'right'], default: 'right' }
+},
 
   updatedAt: { type: Date, default: Date.now }
 });
