@@ -4,7 +4,12 @@ const sendMessage = async (baseUrl, apiKey, message, source, context) => {
   try {
     const response = await axios.post(
       `${baseUrl}/projects/widget/chat`,
-      { message, source, provider: 'groq', context },
+      { 
+        message, 
+        source, 
+        user_id: 'public',
+        data: context 
+      },
       {
         headers: {
           'Content-Type': 'application/json',
