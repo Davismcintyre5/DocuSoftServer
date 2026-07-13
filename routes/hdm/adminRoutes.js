@@ -8,6 +8,8 @@ const projectsController = require('../../controllers/hdm/admin/projectsControll
 const photosController = require('../../controllers/hdm/admin/photosController');
 const contactsController = require('../../controllers/hdm/admin/contactsController');
 const companyController = require('../../controllers/hdm/admin/companyController');
+const cloudinaryController = require('../../controllers/hdm/admin/cloudinaryController');
+const mongodbController = require('../../controllers/hdm/admin/mongodbController');
 const settingsController = require('../../controllers/hdm/admin/settingsController');
 const {
   listBackups, getSettings: getBackupSettings, updateSettings: updateBackupSettings,
@@ -70,5 +72,27 @@ router.post('/backups/auto', triggerAutoBackup);
 router.delete('/backups/:id', deleteBackup);
 router.post('/backups/:id/restore', restoreBackup);
 router.get('/backups/:id/download', downloadBackup);
+
+
+// Cloudinary
+router.get('/cloudinary/stats', cloudinaryController.getStats);
+router.get('/cloudinary/folders', cloudinaryController.getFolders);
+router.get('/cloudinary/folders/*', cloudinaryController.getFolderContents);
+router.get('/cloudinary/file', cloudinaryController.getFile);
+router.delete('/cloudinary/file', cloudinaryController.deleteFile);
+router.post('/cloudinary/upload', upload.single('file'), cloudinaryController.uploadFile);
+router.post('/cloudinary/folder', cloudinaryController.createFolder);
+router.delete('/cloudinary/folder', cloudinaryController.deleteFolder);
+router.post('/cloudinary/rename', cloudinaryController.renameFile);
+
+// MongoDB
+router.get('/mongodb/stats', mongodbController.getStats);
+router.get('/mongodb/databases', mongodbController.getDatabases);
+router.get('/mongodb/database/:db', mongodbController.getCollections);
+router.get('/mongodb/database/:db/:col', mongodbController.getCollection);
+router.get('/mongodb/database/:db/:col/query', mongodbController.queryCollection);
+router.delete('/mongodb/database/:db/:col', mongodbController.dropCollection);
+router.delete('/mongodb/database/:db', mongodbController.dropDatabase);
+
 
 module.exports = router;
